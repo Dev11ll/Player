@@ -42,6 +42,13 @@
   .link{margin-top:14px;font:13px ui-monospace,Consolas,monospace;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;word-break:break-all;color:var(--mute)}
   .tip{color:var(--mute);font-size:13px;line-height:1.6}
   .tip code{background:var(--panel2);padding:1px 6px;border-radius:5px;color:var(--text)}
+  #player{position:fixed;inset:0;width:100vw;height:100vh}
+  #player iframe{width:100%;height:100%}
+  .osd{position:fixed;right:24px;bottom:24px;z-index:6;background:rgba(10,8,18,.82);color:#fff;
+       font:700 22px Inter,system-ui,sans-serif;padding:12px 18px;border-radius:12px;
+       border:1px solid rgba(169,112,255,.6);opacity:0;transform:translateY(8px);transition:.25s}
+  .osd.show{opacity:1;transform:none}
+  .osd small{display:block;font-size:13px;font-weight:500;color:#cfc8e6;margin-top:2px}
   .back{position:fixed;top:10px;left:10px;z-index:5;background:rgba(0,0,0,.6);color:#fff;font:600 13px system-ui;padding:8px 12px;border-radius:8px;text-decoration:none;opacity:0;transition:.2s}
   body.play:hover .back{opacity:1}
 </style>
@@ -87,25 +94,101 @@ if (!vid && p.get("url")) { const r = parseYouTube(p.get("url")); vid = r.id; if
 
 if (/^[\w-]{11}$/.test(vid)) {
   document.body.className = "play";
-  const q = new URLSearchParams({
-    autoplay: "1", rel: "0", playsinline: "1", modestbranding: "1",
-    controls: p.get("controls") === "1" ? "1" : "0",
-    mute: p.get("mute") === "1" ? "1" : "0",
-    origin: location.origin
-  });
-  if (toSeconds(vstart)) q.set("start", toSeconds(vstart));
-  if (p.get("loop") === "1") { q.set("loop", "1"); q.set("playlist", vid); }
+  const loop = p.get("loop") === "1";
+  let volume = Math.max(0, Math.min(100, parseInt(p.get("vol") || "100", 10) || 100));
+  let currentId = vid;
 
   const back = document.createElement("a");
   back.className = "back"; back.textContent = "← Control panel";
   back.href = location.pathname + "?edit=" + encodeURIComponent(location.search);
   document.body.appendChild(back);
 
-  const f = document.createElement("iframe");
-  f.src = "https://www.youtube.com/embed/" + vid + "?" + q.toString();
-  f.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
-  f.referrerPolicy = "strict-origin-when-cross-origin";
-  document.body.appendChild(f);
+  const holder = document.createElement("div"); holder.id = "player"; document.body.appendChild(holder);
+  const osd = document.createElement("div"); osd.className = "osd"; document.body.appendChild(osd);
+  let osdTimer;
+  function show(text, by){
+    osd.innerHTML = text + (by ? `<small>by ${String(by).replace(/[<>&]/g,"")}</small>` : "");
+    osd.classList.add("show"); clearTimeout(osdTimer);
+    osdTimer = setTimeout(() => osd.classList.remove("show"), 2500);
+  }
+
+  let player = null;
+  window.onYouTubeIframeAPIReady = () => {
+    const vars = {
+      autoplay: 1, rel: 0, playsinline: 1, modestbranding: 1,
+      controls: p.get("controls") === "1" ? 1 : 0,
+      mute: p.get("mute") === "1" ? 1 : 0,
+      origin: location.origin, enablejsapi: 1
+    };
+    if (toSeconds(vstart)) vars.start = toSeconds(vstart);
+    if (loop) { vars.loop = 1; vars.playlist = vid; }
+    player = new YT.Player("player", {
+      videoId: vid, playerVars: vars,
+      events: {
+        onReady: e => { e.target.setVolume(volume); e.target.playVideo(); ready = true; queue.splice(0).forEach(handle); },
+        onStateChange: e => { if (loop && e.data === YT.PlayerState.ENDED) { e.target.seekTo(0); e.target.playVideo(); } }
+      }
+    });
+    const f = document.querySelector("#player");
+    if (f && f.tagName === "IFRAME") f.referrerPolicy = "strict-origin-when-cross-origin";
+  };
+  const api = document.createElement("script");
+  api.src = "https://www.youtube.com/iframe_api";
+  document.head.appendChild(api);
+
+  // ----- chat control through Streamer.bot (WebSocket Server) -----
+  let ready = false; const queue = [];
+  function handle(cmd){
+    if (!cmd || !cmd.action) return;
+    if (!ready) { queue.push(cmd); return; }      // player still loading: run it when ready
+    const by = cmd.user || "";
+    const v = String(cmd.value || "").trim().toLowerCase();
+    switch (cmd.action) {
+      case "volume": {
+        let n = volume;
+        if (v === "up") n += 10; else if (v === "down") n -= 10;
+        else if (/^[+-]\d+$/.test(v)) n += parseInt(v, 10);
+        else if (/^\d+$/.test(v)) n = parseInt(v, 10);
+        else { show("🔊 Volume " + volume + "%"); return; }
+        volume = Math.max(0, Math.min(100, n));
+        player.unMute(); player.setVolume(volume);
+        show((volume === 0 ? "🔇" : volume < 50 ? "🔉" : "🔊") + " Volume " + volume + "%", by);
+        break;
+      }
+      case "pause":   player.pauseVideo(); show("⏸️ Paused", by); break;
+      case "play":    player.playVideo();  show("▶️ Playing", by); break;
+      case "toggle":  (player.getPlayerState() === 1 ? (player.pauseVideo(), show("⏸️ Paused", by)) : (player.playVideo(), show("▶️ Playing", by))); break;
+      case "mute":    player.mute();   show("🔇 Muted", by); break;
+      case "unmute":  player.unMute(); player.setVolume(volume); show("🔊 Unmuted", by); break;
+      case "restart": player.seekTo(0, true); player.playVideo(); show("⏮️ Restarted", by); break;
+      case "skip": {
+        const secs = parseInt(v, 10) || 10;
+        player.seekTo(Math.max(0, player.getCurrentTime() + secs), true);
+        show((secs >= 0 ? "⏩ +" : "⏪ ") + secs + "s", by); break;
+      }
+      case "video": {
+        const r = parseYouTube(cmd.value);
+        if (!r.id) { show("❌ Not a YouTube link", by); return; }
+        currentId = r.id;
+        player.loadVideoById({ videoId: r.id, startSeconds: r.start || 0 });
+        player.setVolume(volume);
+        show("🎬 New video", by); break;
+      }
+    }
+  }
+
+  const port = p.get("ws") || "8080";
+  function connect(){
+    let ws;
+    try { ws = new WebSocket("ws://127.0.0.1:" + port + "/"); } catch (e) { return setTimeout(connect, 5000); }
+    ws.onmessage = m => {
+      let d; try { d = JSON.parse(m.data); } catch (e) { return; }
+      if (d && d.obsplayer) handle(d);                              // our broadcast
+      else if (d && d.data && d.data.obsplayer) handle(d.data);     // wrapped as custom event
+    };
+    ws.onclose = () => setTimeout(connect, 5000);                   // keep trying (Streamer.bot restarts etc.)
+  }
+  connect();
 }
 
 // ---------- CONTROL PANEL MODE ----------
