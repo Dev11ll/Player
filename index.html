@@ -84,6 +84,7 @@ function playerLink(o){
   if (o.loop) q.set("loop", "1");
   if (o.mute) q.set("mute", "1");
   if (o.controls) q.set("controls", "1");
+  if (new URLSearchParams(location.search).get("debug") === "1") q.set("debug", "1");   // keep debug mode
   return location.origin + location.pathname + "?" + q.toString();
 }
 
@@ -100,7 +101,7 @@ if (/^[\w-]{11}$/.test(vid)) {
 
   const back = document.createElement("a");
   back.className = "back"; back.textContent = "← Control panel";
-  back.href = location.pathname + "?edit=" + encodeURIComponent(location.search);
+  back.href = location.pathname + "?edit=" + encodeURIComponent(location.search) + (p.get("debug") === "1" ? "&debug=1" : "");
   document.body.appendChild(back);
 
   const holder = document.createElement("div"); holder.id = "player"; document.body.appendChild(holder);
