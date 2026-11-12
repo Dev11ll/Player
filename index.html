@@ -178,15 +178,33 @@ if (/^[\w-]{11}$/.test(vid)) {
   }
 
   const port = p.get("ws") || "8080";
+  // Debug box: add &debug=1 to the link to see the connection and what arrives
+  const debug = p.get("debug") === "1";
+  let dbg = null;
+  if (debug) {
+    dbg = document.createElement("div");
+    dbg.style.cssText = "position:fixed;left:10px;bottom:10px;z-index:9;background:rgba(0,0,0,.85);color:#fff;font:14px monospace;padding:10px 12px;border-radius:8px;max-width:90vw;white-space:pre-wrap";
+    document.body.appendChild(dbg);
+  }
+  let dbgState = "connecting…", dbgLast = "(nothing yet)";
+  const dbgShow = () => { if (dbg) dbg.textContent = "Streamer.bot: " + dbgState + "\nLast message: " + dbgLast + "\nPlayer ready: " + ready; };
+  setInterval(dbgShow, 500);
+
   function connect(){
     let ws;
-    try { ws = new WebSocket("ws://127.0.0.1:" + port + "/"); } catch (e) { return setTimeout(connect, 5000); }
+    try { ws = new WebSocket("ws://127.0.0.1:" + port + "/"); }
+    catch (e) { dbgState = "🔴 error: " + e.message; return setTimeout(connect, 5000); }
+    ws.onopen = () => { dbgState = "🟢 connected (port " + port + ")"; };
+    ws.onerror = () => { dbgState = "🔴 can't connect to 127.0.0.1:" + port + " (is the WebSocket Server started?)"; };
     ws.onmessage = m => {
+      dbgLast = String(m.data).slice(0, 200);
       let d; try { d = JSON.parse(m.data); } catch (e) { return; }
+      if (typeof d === "string") { try { d = JSON.parse(d); } catch (e) {} }
       if (d && d.obsplayer) handle(d);                              // our broadcast
       else if (d && d.data && d.data.obsplayer) handle(d.data);     // wrapped as custom event
+      else if (d && d.data && typeof d.data === "string") { try { const x = JSON.parse(d.data); if (x.obsplayer) handle(x); } catch (e) {} }
     };
-    ws.onclose = () => setTimeout(connect, 5000);                   // keep trying (Streamer.bot restarts etc.)
+    ws.onclose = () => { if (dbgState.startsWith("🟢")) dbgState = "🔴 disconnected, retrying…"; setTimeout(connect, 5000); };                   // keep trying (Streamer.bot restarts etc.)
   }
   connect();
 }
