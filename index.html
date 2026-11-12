@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>OBS YouTube Player</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  iframe { display: block; border: 0; width: 100vw; height: 100vh; }
+  .help { font: 16px sans-serif; color: #fff; background: #111; padding: 20px; }
+</style>
+</head>
+<body>
+<script>
+/*
+  OBS YouTube player (fixes YouTube "Error 153").
+  Use as an OBS Browser Source URL:
+    player.html?v=VIDEO_ID             play a video
+    &start=62                          start at 62 seconds
+    &loop=1                            loop forever
+    &mute=1                            no sound
+    &controls=1                        show YouTube controls
+  You can also paste a full YouTube link:  player.html?url=https://www.youtube.com/watch?v=...
+*/
+const p = new URLSearchParams(location.search);
+let id = p.get("v") || "";
+let start = p.get("start") || "";
+
+const url = p.get("url");
+if (!id && url) {
+  try {
+    const u = new URL(url);
+    id = u.searchParams.get("v") || (u.hostname.includes("youtu.be") ? u.pathname.slice(1) : "")
+         || (u.pathname.match(/\/(embed|shorts|live)\/([^/?]+)/) || [])[2] || "";
+    if (!start && u.searchParams.get("t")) start = parseInt(u.searchParams.get("t"), 10) || "";
+  } catch (e) {}
+}
+
+if (!/^[\w-]{11}$/.test(id)) {
+  document.body.innerHTML = '<div class="help">No video. Use player.html?v=VIDEO_ID</div>';
+} else {
+  const q = new URLSearchParams({
+    autoplay: "1", rel: "0", playsinline: "1",
+    controls: p.get("controls") === "1" ? "1" : "0",
+    mute: p.get("mute") === "1" ? "1" : "0",
+    origin: location.origin
+  });
+  if (start) q.set("start", start);
+  if (p.get("loop") === "1") { q.set("loop", "1"); q.set("playlist", id); }
+
+  const f = document.createElement("iframe");
+  f.src = "https://www.youtube.com/embed/" + id + "?" + q.toString();
+  f.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+  f.referrerPolicy = "strict-origin-when-cross-origin";
+  document.body.appendChild(f);
+}
+</script>
+</body>
+</html>
