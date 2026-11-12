@@ -195,10 +195,14 @@ if (/^[\w-]{11}$/.test(vid)) {
     let ws;
     try { ws = new WebSocket("ws://127.0.0.1:" + port + "/"); }
     catch (e) { dbgState = "🔴 error: " + e.message; return setTimeout(connect, 5000); }
-    ws.onopen = () => { dbgState = "🟢 connected (port " + port + ")"; };
+    ws.onopen = () => {
+      dbgState = "🟢 connected (port " + port + ")";
+      // Ask Streamer.bot to send us custom broadcasts (CPH.WebsocketBroadcastJson)
+      ws.send(JSON.stringify({ request: "Subscribe", id: "obsplayer-sub", events: { General: ["Custom"] } }));
+    };
     ws.onerror = () => { dbgState = "🔴 can't connect to 127.0.0.1:" + port + " (is the WebSocket Server started?)"; };
     ws.onmessage = m => {
-      dbgLast = String(m.data).slice(0, 200);
+      dbgLast = String(m.data).slice(0, 300);
       let d; try { d = JSON.parse(m.data); } catch (e) { return; }
       if (typeof d === "string") { try { d = JSON.parse(d); } catch (e) {} }
       if (d && d.obsplayer) handle(d);                              // our broadcast
