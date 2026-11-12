@@ -2,57 +2,209 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <title>OBS YouTube Player</title>
 <style>
-  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
-  iframe { display: block; border: 0; width: 100vw; height: 100vh; }
-  .help { font: 16px sans-serif; color: #fff; background: #111; padding: 20px; }
+  :root{--bg:#0d0b14;--panel:#16131f;--panel2:#1d1929;--line:#2a2538;--text:#ece9f5;--mute:#8e88a3;--accent:#a970ff;--ok:#6be3c9;--bad:#ff7a90}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:100%;height:100%}
+  body{font-family:Inter,system-ui,sans-serif;color:var(--text)}
+  body.play{background:transparent;overflow:hidden}
+  body.play iframe{display:block;border:0;width:100vw;height:100vh}
+
+  body.panel{background:var(--bg);background-image:radial-gradient(ellipse 80% 50% at 50% -10%,#2a1a4a 0%,transparent 70%);min-height:100vh}
+  .wrap{max-width:720px;margin:0 auto;padding:40px 18px 60px}
+  h1{font-size:30px;letter-spacing:-.02em;margin-bottom:6px}
+  .sub{color:var(--mute);font-size:14px;margin-bottom:26px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;margin-bottom:16px}
+  label.t{display:block;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--mute);margin-bottom:8px}
+  input[type=text]{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);font:15px Inter,system-ui,sans-serif;padding:12px 14px;border-radius:10px;outline:none}
+  input[type=text]:focus{border-color:var(--accent)}
+  .status{font-size:13px;margin-top:8px;min-height:18px}
+  .status.ok{color:var(--ok)} .status.bad{color:var(--bad)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .opt{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;cursor:pointer;user-select:none}
+  .opt:hover{border-color:#3a3350}
+  .opt input{width:18px;height:18px;accent-color:var(--accent)}
+  .opt b{font-size:14px;font-weight:600}
+  .opt small{display:block;color:var(--mute);font-size:12px;font-weight:400}
+  .start{display:flex;gap:10px;align-items:center;margin-top:12px}
+  .start input{max-width:120px}
+  .start span{color:var(--mute);font-size:13px}
+  .preview{aspect-ratio:16/9;background:#000;border-radius:12px;overflow:hidden;display:grid;place-items:center;color:var(--mute);font-size:14px}
+  .preview img{width:100%;height:100%;object-fit:cover}
+  .btns{display:flex;gap:10px;flex-wrap:wrap}
+  button{font:600 14px Inter,system-ui,sans-serif;border:0;border-radius:10px;padding:12px 18px;cursor:pointer}
+  .primary{background:var(--accent);color:#fff}
+  .ghost{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  .link{margin-top:14px;font:13px ui-monospace,Consolas,monospace;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;word-break:break-all;color:var(--mute)}
+  .tip{color:var(--mute);font-size:13px;line-height:1.6}
+  .tip code{background:var(--panel2);padding:1px 6px;border-radius:5px;color:var(--text)}
+  .back{position:fixed;top:10px;left:10px;z-index:5;background:rgba(0,0,0,.6);color:#fff;font:600 13px system-ui;padding:8px 12px;border-radius:8px;text-decoration:none;opacity:0;transition:.2s}
+  body.play:hover .back{opacity:1}
 </style>
 </head>
 <body>
 <script>
-/*
-  OBS YouTube player (fixes YouTube "Error 153").
-  Use as an OBS Browser Source URL:
-    player.html?v=VIDEO_ID             play a video
-    &start=62                          start at 62 seconds
-    &loop=1                            loop forever
-    &mute=1                            no sound
-    &controls=1                        show YouTube controls
-  You can also paste a full YouTube link:  player.html?url=https://www.youtube.com/watch?v=...
-*/
-const p = new URLSearchParams(location.search);
-let id = p.get("v") || "";
-let start = p.get("start") || "";
-
-const url = p.get("url");
-if (!id && url) {
+// ---------- helpers ----------
+function parseYouTube(text){
+  text = (text || "").trim();
+  if (/^[\w-]{11}$/.test(text)) return { id: text, start: 0 };
   try {
-    const u = new URL(url);
-    id = u.searchParams.get("v") || (u.hostname.includes("youtu.be") ? u.pathname.slice(1) : "")
-         || (u.pathname.match(/\/(embed|shorts|live)\/([^/?]+)/) || [])[2] || "";
-    if (!start && u.searchParams.get("t")) start = parseInt(u.searchParams.get("t"), 10) || "";
-  } catch (e) {}
+    const u = new URL(text.startsWith("http") ? text : "https://" + text);
+    let id = u.searchParams.get("v") || "";
+    if (!id && u.hostname.includes("youtu.be")) id = u.pathname.slice(1).split("/")[0];
+    if (!id) { const m = u.pathname.match(/\/(embed|shorts|live|v)\/([\w-]{11})/); if (m) id = m[2]; }
+    let t = u.searchParams.get("t") || u.searchParams.get("start") || "";
+    return { id: /^[\w-]{11}$/.test(id) ? id : "", start: toSeconds(t) };
+  } catch (e) { return { id: "", start: 0 }; }
+}
+function toSeconds(t){
+  t = String(t || "").trim();
+  if (!t) return 0;
+  if (/^\d+$/.test(t)) return +t;
+  if (/^\d+(:\d{1,2}){1,2}$/.test(t)) return t.split(":").reduce((a,b)=>a*60+(+b),0);
+  const m = t.match(/(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/);
+  return m ? (+(m[1]||0))*3600 + (+(m[2]||0))*60 + (+(m[3]||0)) : 0;
+}
+function fmt(s){ s=+s||0; const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60;
+  return (h? h+":"+String(m).padStart(2,"0") : m) + ":" + String(x).padStart(2,"0"); }
+function playerLink(o){
+  const q = new URLSearchParams({ v: o.id });
+  if (o.start) q.set("start", o.start);
+  if (o.loop) q.set("loop", "1");
+  if (o.mute) q.set("mute", "1");
+  if (o.controls) q.set("controls", "1");
+  return location.origin + location.pathname + "?" + q.toString();
 }
 
-if (!/^[\w-]{11}$/.test(id)) {
-  document.body.innerHTML = '<div class="help">No video. Use player.html?v=VIDEO_ID</div>';
-} else {
+// ---------- PLAYER MODE (used by OBS) ----------
+const p = new URLSearchParams(location.search);
+let vid = p.get("v") || "", vstart = p.get("start") || "";
+if (!vid && p.get("url")) { const r = parseYouTube(p.get("url")); vid = r.id; if (!vstart && r.start) vstart = r.start; }
+
+if (/^[\w-]{11}$/.test(vid)) {
+  document.body.className = "play";
   const q = new URLSearchParams({
-    autoplay: "1", rel: "0", playsinline: "1",
+    autoplay: "1", rel: "0", playsinline: "1", modestbranding: "1",
     controls: p.get("controls") === "1" ? "1" : "0",
     mute: p.get("mute") === "1" ? "1" : "0",
     origin: location.origin
   });
-  if (start) q.set("start", start);
-  if (p.get("loop") === "1") { q.set("loop", "1"); q.set("playlist", id); }
+  if (toSeconds(vstart)) q.set("start", toSeconds(vstart));
+  if (p.get("loop") === "1") { q.set("loop", "1"); q.set("playlist", vid); }
+
+  const back = document.createElement("a");
+  back.className = "back"; back.textContent = "← Control panel";
+  back.href = location.pathname + "?edit=" + encodeURIComponent(location.search);
+  document.body.appendChild(back);
 
   const f = document.createElement("iframe");
-  f.src = "https://www.youtube.com/embed/" + id + "?" + q.toString();
+  f.src = "https://www.youtube.com/embed/" + vid + "?" + q.toString();
   f.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
   f.referrerPolicy = "strict-origin-when-cross-origin";
   document.body.appendChild(f);
+}
+
+// ---------- CONTROL PANEL MODE ----------
+else {
+  document.body.className = "panel";
+  document.body.insertAdjacentHTML("beforeend", `
+  <div class="wrap">
+    <h1>🎬 OBS Video Player</h1>
+    <p class="sub">Paste a YouTube link, pick options, then open it or copy the link for OBS.</p>
+
+    <div class="card">
+      <label class="t" for="link">YouTube link</label>
+      <input type="text" id="link" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off">
+      <div class="status" id="status"></div>
+      <div class="start">
+        <label class="t" for="start" style="margin:0">Start at</label>
+        <input type="text" id="start" placeholder="0:00">
+        <span>(e.g. 1:02 or 62)</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <label class="t">Options</label>
+      <div class="grid">
+        <label class="opt"><input type="checkbox" id="loop"><div><b>🔁 Loop</b><small>Replay forever</small></div></label>
+        <label class="opt"><input type="checkbox" id="mute"><div><b>🔇 Mute</b><small>No sound</small></div></label>
+        <label class="opt"><input type="checkbox" id="controls"><div><b>⏯️ Controls</b><small>Show YouTube buttons</small></div></label>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="preview" id="preview">Video preview shows here</div>
+    </div>
+
+    <div class="card">
+      <div class="btns">
+        <button class="primary" id="go" disabled>▶ Open player</button>
+        <button class="ghost" id="copy" disabled>📋 Copy OBS link</button>
+      </div>
+      <div class="link" id="out">Your OBS link will show here</div>
+    </div>
+
+    <div class="card tip">
+      <b>How to use in OBS:</b> copy the link above and paste it as the URL of a <code>Browser</code> source
+      (1920×1080, tick <code>Control audio via OBS</code>).<br>
+      Or put <b>this page</b> in OBS and use <b>right-click → Interact</b> to paste links and press Open live.
+      Hover the video and click <b>← Control panel</b> to come back.
+    </div>
+  </div>`);
+
+  const $ = id => document.getElementById(id);
+  let current = { id: "" };
+
+  function update(){
+    const r = parseYouTube($("link").value);
+    current = {
+      id: r.id,
+      start: toSeconds($("start").value),
+      loop: $("loop").checked, mute: $("mute").checked, controls: $("controls").checked
+    };
+    const ok = !!r.id;
+    $("go").disabled = $("copy").disabled = !ok;
+    $("status").className = "status " + (ok ? "ok" : ($("link").value.trim() ? "bad" : ""));
+    $("status").textContent = ok ? "✓ Video found" + (current.start ? " · starts at " + fmt(current.start) : "")
+                                 : ($("link").value.trim() ? "That doesn't look like a YouTube link" : "");
+    $("preview").innerHTML = ok ? `<img src="https://i.ytimg.com/vi/${r.id}/hqdefault.jpg" alt="">` : "Video preview shows here";
+    $("out").textContent = ok ? playerLink(current) : "Your OBS link will show here";
+  }
+
+  // When a link is pasted, fill "Start at" from its t= value
+  $("link").addEventListener("input", () => {
+    const r = parseYouTube($("link").value);
+    if (r.id && r.start && !$("start").dataset.touched) $("start").value = fmt(r.start);
+    update();
+  });
+  $("start").addEventListener("input", () => { $("start").dataset.touched = "1"; update(); });
+  ["loop","mute","controls"].forEach(id => $(id).addEventListener("change", update));
+  $("link").addEventListener("keydown", e => { if (e.key === "Enter" && current.id) location.href = playerLink(current); });
+
+  $("go").onclick = () => { if (current.id) location.href = playerLink(current); };
+  $("copy").onclick = async () => {
+    const text = playerLink(current);
+    try { await navigator.clipboard.writeText(text); }
+    catch (e) { const t = document.createElement("textarea"); t.value = text; document.body.appendChild(t); t.select(); document.execCommand("copy"); t.remove(); }
+    $("copy").textContent = "✓ Copied!"; setTimeout(() => $("copy").textContent = "📋 Copy OBS link", 1500);
+  };
+
+  // Coming back from the player: refill the form
+  const edit = p.get("edit");
+  if (edit) {
+    const e = new URLSearchParams(edit);
+    if (e.get("v")) $("link").value = "https://www.youtube.com/watch?v=" + e.get("v");
+    if (e.get("start")) { $("start").value = fmt(e.get("start")); $("start").dataset.touched = "1"; }
+    $("loop").checked = e.get("loop") === "1";
+    $("mute").checked = e.get("mute") === "1";
+    $("controls").checked = e.get("controls") === "1";
+  }
+  update();
+  $("link").focus();
 }
 </script>
 </body>
